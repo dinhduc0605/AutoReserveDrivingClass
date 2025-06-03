@@ -1,0 +1,4 @@
+schedule
+selenium
+python-dotenv
+slack-sdk
