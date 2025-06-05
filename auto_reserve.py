@@ -1,7 +1,7 @@
 import os
 import time
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -77,49 +77,89 @@ def login_to_e_license(driver):
         print(f"Error during login: {e}")
         return False
 
-def find_status1_elements(driver) -> List[str]:
+def find_status1_elements(driver) -> List[Dict[str, Any]]:
     """
-    Find all td elements with class 'status1' and extract the datetime information.
-    Returns a list of formatted datetime strings like '6月27日(金) 9:00'.
+    Find all td elements with class 'status1' and extract structured datetime information.
+    Returns a list of dictionaries, each containing parsed date/time components
+    and a pre-formatted string.
+    Example dict: {
+        'year': 2025, 'month': 6, 'day': 27, 'hour': 9, 'minute': 0,
+        'weekday_val': 4, # Monday is 0, Sunday is 6. From datetime.weekday()
+        'formatted_str': '6月27日(金) 9:00'
+    }
     """
     results = []
     try:
         # Find all td elements with class 'status1' but without class 'mikata-table'
         status1_elements = driver.find_elements(By.CSS_SELECTOR, "td.status1:not(.mikata-table)")
         
-        # Get datetime information from each element
         for element in status1_elements:
             try:
-                # Find the <a> tag inside the td
                 a_tag = element.find_element(By.TAG_NAME, "a")
-                
-                # Extract date and time attributes
-                date_text = a_tag.get_attribute("data-date")
-                time_text = a_tag.get_attribute("data-time")
-                week_text = a_tag.get_attribute("data-week")
-                
-                # Format as '6月27日(金) 9:00'
-                if date_text and time_text and week_text:
-                    formatted_datetime = f"{date_text}{week_text} {time_text}"
-                    results.append(formatted_datetime)
+                data_yoyaku = a_tag.get_attribute("data-yoyaku") # YYYYMMDD
+                data_date = a_tag.get_attribute("data-date")     # M月D日 (e.g., 6月27日)
+                data_time = a_tag.get_attribute("data-time")     # H:MM (e.g., 9:00)
+                data_week = a_tag.get_attribute("data-week")     # (曜日) (e.g., (金))
+
+                if data_yoyaku and data_time and data_date and data_week:
+                    year = int(data_yoyaku[:4])
+                    month = int(data_yoyaku[4:6])
+                    day = int(data_yoyaku[6:])
+                    hour, minute = map(int, data_time.split(':'))
+                    
+                    dt_obj = datetime(year, month, day, hour, minute)
+                    weekday_val = dt_obj.weekday() # Monday is 0, Sunday is 6
+
+                    # data_week includes parentheses like "(金)", so just concatenate
+                    formatted_str = f"{data_date}{data_week} {data_time}"
+                    
+                    slot_data = {
+                        'year': year, 'month': month, 'day': day, 
+                        'hour': hour, 'minute': minute,
+                        'weekday_val': weekday_val,
+                        'formatted_str': formatted_str
+                    }
+                    results.append(slot_data)
             except Exception as e:
-                print(f"Error extracting datetime from element: {e}")
-                # If we can't extract the attributes, fall back to text content
-                content = element.text.strip()
-                if content:
-                    results.append(content)
+                print(f"Error extracting structured datetime from element: {e}")
         
-        print(f"Found {len(results)} status1 elements on current page.")
+        print(f"Found and processed {len(results)} status1 elements on current page.")
     except Exception as e:
         print(f"Error finding status1 elements: {e}")
     
     return results
 
+def should_notify_for_slot(slot_data: Dict[str, Any]) -> bool:
+    """
+    Checks if a slot meets the notification criteria.
+    - Weekends (Saturday or Sunday)
+    - Weekdays and hour >= 19:00
+    - Wednesday and hour = 13:00
+    All datetime comparisons are based on Japan Standard Time (JST) implicitly,
+    as the source data is from a Japanese website.
+    """
+    hour = slot_data['hour']
+    weekday_val = slot_data['weekday_val'] # Monday is 0, Sunday is 6
+
+    # Condition 1: Weekends
+    if weekday_val == 5 or weekday_val == 6: # Saturday or Sunday
+        return True
+    
+    # Condition 2: Weekdays and hour >= 19:00
+    if 0 <= weekday_val <= 4 and hour >= 19: # Monday to Friday
+        return True
+        
+    # Condition 3: Wednesday and hour = 13:00
+    if weekday_val == 2 and hour == 13: # Wednesday
+        return True
+        
+    return False
+
 def check_for_available_slots():
     """
     Check for available slots on the e-license website.
     """
-    all_results = []
+    all_slot_data_list = [] # Stores list of dicts from find_status1_elements
     
     with create_driver() as driver:
         if not login_to_e_license(driver):
@@ -133,8 +173,8 @@ def check_for_available_slots():
             print(f"Processing page {page_count}...")
             
             # Find all td elements with class 'status1' on current page
-            page_results = find_status1_elements(driver)
-            all_results.extend(page_results)
+            page_slot_data_list = find_status1_elements(driver)
+            all_slot_data_list.extend(page_slot_data_list)
             
             # Check if there's a next page button
             try:
@@ -147,11 +187,19 @@ def check_for_available_slots():
                 print("No more next week buttons found")
                 has_next_page = False
     
-    # Send results via Slack
-    if all_results:
-        send_slack_notification(all_results)
+    # Filter slots based on notification criteria
+    slots_for_notification = [] # This will hold formatted strings of slots to notify
+    if all_slot_data_list:
+        for slot_data in all_slot_data_list:
+            if should_notify_for_slot(slot_data):
+                slots_for_notification.append(slot_data['formatted_str'])
+        
+        if slots_for_notification:
+            send_slack_notification(slots_for_notification)
+        else:
+            print("No slots meeting notification criteria found.")
     else:
-        print("No available slots found.")
+        print("No available slots found on any page.")
 
 def send_slack_notification(results: List[str]):
     """
@@ -163,15 +211,20 @@ def send_slack_notification(results: List[str]):
     
     client = WebClient(token=SLACK_TOKEN)
     
-    # Remove duplicates while preserving order
-    unique_results = []
+    # 'results' here are the 'slots_for_notification' (formatted strings that met criteria)
+    # Remove duplicates while preserving order from the already filtered list
+    unique_filtered_results = []
     for result in results:
-        if result not in unique_results:
-            unique_results.append(result)
-    
+        if result not in unique_filtered_results:
+            unique_filtered_results.append(result)
+
+    if not unique_filtered_results:
+        print("No unique slots to notify after filtering and duplicate removal. Skipping Slack notification.")
+        return
+
     # Format the message
-    message = "https://www.e-license.jp/el31/mSg1DWxRvAI-brGQYS-1OA==\n*予約可能な時間：*\n"
-    for result in unique_results:
+    message = "https://www.e-license.jp/el31/mSg1DWxRvAI-brGQYS-1OA==\n予約可能時間（フィルタ条件合致）：\n" # Updated title
+    for result in unique_filtered_results:
         message += f"- {result}\n"
     
     try:
@@ -179,7 +232,7 @@ def send_slack_notification(results: List[str]):
             channel=SLACK_CHANNEL,
             text=message
         )
-        print(f"Slack notification sent at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"Slack notification sent for filtered slots at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     except SlackApiError as e:
         print(f"Error sending Slack notification: {e.response['error']}")
 
