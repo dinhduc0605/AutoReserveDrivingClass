@@ -246,8 +246,8 @@ def main():
     # Run once immediately
     check_for_available_slots()
     
-    # Schedule to run every 3 minutes
-    schedule.every(3).minutes.do(check_for_available_slots)
+    # Schedule to run every 2 minutes
+    schedule.every(2).minutes.do(check_for_available_slots)
     
     while True:
         schedule.run_pending()
