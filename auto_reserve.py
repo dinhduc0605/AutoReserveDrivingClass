@@ -1,6 +1,6 @@
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from dotenv import load_dotenv
 
@@ -132,12 +132,26 @@ def find_status1_elements(driver) -> List[Dict[str, Any]]:
 def should_notify_for_slot(slot_data: Dict[str, Any]) -> bool:
     """
     Checks if a slot meets the notification criteria.
+    - Must be within the next 2 weeks.
     - Weekends (Saturday or Sunday)
     - Weekdays and hour >= 19:00
     - Wednesday and hour = 13:00
     All datetime comparisons are based on Japan Standard Time (JST) implicitly,
     as the source data is from a Japanese website.
     """
+    # Condition 0: Check if the slot is within the next 2 weeks.
+    now = datetime.now()
+    two_weeks_from_now = now + timedelta(weeks=2)
+    slot_dt = datetime(
+        slot_data['year'],
+        slot_data['month'],
+        slot_data['day'],
+        slot_data['hour'],
+        slot_data['minute']
+    )
+    if slot_dt > two_weeks_from_now:
+        return False
+
     hour = slot_data['hour']
     weekday_val = slot_data['weekday_val'] # Monday is 0, Sunday is 6
 
