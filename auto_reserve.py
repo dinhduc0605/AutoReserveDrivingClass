@@ -252,20 +252,13 @@ def send_slack_notification(results: List[str]):
 
 def main():
     """
-    Main function to schedule the checking of available slots.
+    Main function to check for available slots every 30 seconds.
     """
     print("Starting auto_reserve.py...")
-    print(f"Will check for available slots every 3 minutes.")
-    
-    # Run once immediately
-    check_for_available_slots()
-    
-    # Schedule to run every 2 minutes
-    schedule.every(2).minutes.do(check_for_available_slots)
-    
+    print("Will check for available slots every 20 seconds.")
     while True:
-        schedule.run_pending()
-        time.sleep(1)
+        check_for_available_slots()
+        time.sleep(20)
 
 if __name__ == "__main__":
     import argparse
