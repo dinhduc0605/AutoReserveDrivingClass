@@ -132,14 +132,16 @@ def find_status1_elements(driver) -> List[Dict[str, Any]]:
 def should_notify_for_slot(slot_data: Dict[str, Any]) -> bool:
     """
     Checks if a slot meets the notification criteria.
-    - Must be before 2025/7/17 and after 2025/7/13.
+    - Must be within the next 2 weeks.
     - Weekends (Saturday or Sunday)
     - Weekdays and hour >= 19:00
     - Wednesday and hour = 13:00
     All datetime comparisons are based on Japan Standard Time (JST) implicitly,
     as the source data is from a Japanese website.
     """
-    # Condition 0: Check if the slot is before 2025/7/17 and after 2025/7/13.
+    # Condition 0: Check if the slot is within the next 2 weeks.
+    now = datetime.now()
+    two_weeks_from_now = now + timedelta(weeks=2)
     slot_dt = datetime(
         slot_data['year'],
         slot_data['month'],
@@ -147,9 +149,7 @@ def should_notify_for_slot(slot_data: Dict[str, Any]) -> bool:
         slot_data['hour'],
         slot_data['minute']
     )
-    lower_dt = datetime(2025, 7, 13, 23, 59, 59)
-    upper_dt = datetime(2025, 7, 17)
-    if not (lower_dt < slot_dt < upper_dt):
+    if slot_dt > two_weeks_from_now:
         return False
 
     hour = slot_data['hour']
